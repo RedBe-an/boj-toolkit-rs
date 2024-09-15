@@ -1,291 +1,136 @@
 #![allow(dead_code)]
 
-use log::{Level, Metadata, Record, };
-use chrono::Local;
-use colored::*;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::Arc;
-
-/// Represents a log entry with timestamp, level, and message.
-#[derive(Debug, Clone)]
-pub struct LogEntry {
-    timestamp: String,
-    level: Level,
-    message: String,
+pub enum LogLevel {
+    Info,
+    Error,
+    Warning,
+    Debug,
 }
 
-impl LogEntry {
-    /// Creates a new LogEntry instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `level` - The log level of the entry.
-    /// * `message` - The message content of the log entry.
-    ///
-    /// # Returns
-    ///
-    /// A new `LogEntry` instance.
-    fn new(level: Level, message: &str) -> Self {
-        Self {
-            timestamp: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-            level,
-            message: message.to_string(),
-        }
-    }
+use console::{style, Term};
+use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
+use indicatif::{ProgressBar, ProgressStyle};
+use log::{debug, error, info, warn};
+use std::io;
+
+pub struct ConsoleController {
+    term: Term,
 }
 
-/// Defines the interface for log handlers.
-pub trait LogHandler: Send + Sync {
-    /// Handles a log entry.
-    ///
-    /// # Arguments
-    ///
-    /// * `entry` - The log entry to be handled.
-    fn handle(&self, entry: &LogEntry);
-}
-
-/// Defines the interface for log formatters.
-pub trait LogFormatter: Send + Sync {
-    /// Formats a log entry into a string.
-    ///
-    /// # Arguments
-    ///
-    /// * `entry` - The log entry to be formatted.
-    ///
-    /// # Returns
-    ///
-    /// A formatted string representation of the log entry.
-    fn format(&self, entry: &LogEntry) -> String;
-}
-
-/// Custom logger implementing the Builder pattern.
-pub struct CustomLogger {
-    handlers: Vec<Arc<dyn LogHandler>>,
-}
-
-impl CustomLogger {
-    /// Creates a new CustomLogger instance.
-    ///
-    /// # Returns
-    ///
-    /// A new `CustomLogger` instance with no handlers.
+impl ConsoleController {
     pub fn new() -> Self {
-        Self {
-            handlers: Vec::new(),
+        ConsoleController {
+            term: Term::stdout(),
         }
     }
-
-    /// Adds a new handler to the logger.
-    ///
-    /// # Arguments
-    ///
-    /// * `handler` - The log handler to be added.
-    ///
-    /// # Returns
-    ///
-    /// The `CustomLogger` instance for method chaining.
-    pub fn add_handler(mut self, handler: Arc<dyn LogHandler>) -> Self {
-        self.handlers.push(handler);
-        self
-    }
-}
-
-impl log::Log for CustomLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Debug
+    pub fn info<T: std::fmt::Display>(&self, message: T) {
+        println!("{} {}", style("[INFO]").cyan(), message);
+        info!("{}", message);
     }
 
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            let log_entry = LogEntry::new(record.level(), &record.args().to_string());
-            for handler in &self.handlers {
-                handler.handle(&log_entry);
+    pub fn error<T: std::fmt::Display>(&self, message: T) {
+        eprintln!("{} {}", style("[ERROR]").red().bold(), message);
+        error!("{}", message);
+    }
+    
+    pub fn warning<T: std::fmt::Display>(&self, message: T) {
+        println!("{} {}", style("[WARNING]").yellow(), message);
+        warn!("{}", message);
+    }
+    
+    pub fn debug<T: std::fmt::Display>(&self, message: T) {
+        println!("{} {}", style("[DEBUG]").magenta(), message);
+        debug!("{}", message);
+    }
+    
+
+    pub fn ask_input(&self, prompt: &str) -> io::Result<String> {
+        Input::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .interact_text()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn ask_confirm(&self, prompt: &str) -> io::Result<bool> {
+        Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .interact()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn ask_select<T: ToString>(&self, prompt: &str, items: &[T]) -> io::Result<usize> {
+        Select::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .items(items)
+            .interact()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn show_progress(&self, total: u64) -> ProgressBar {
+        let pb = ProgressBar::new(total);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.blue} [{elapsed_precise}] [{bar:50.blue/cyan}] {pos}/{len} {eta}",
+                )
+                .unwrap()
+                .progress_chars("▰▱"),
+        );
+        pb
+    }
+
+    pub fn clear_screen(&self) -> io::Result<()> {
+        self.term.clear_screen()
+    }
+
+    pub fn set_title(&self, title: &str) {
+        self.term.set_title(title);
+    }
+
+    pub fn ask_password(&self, prompt: &str, confirm: &str, mismatch: &str) -> String {
+        let password = Password::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .with_confirmation(confirm, mismatch)
+            .interact()
+            .unwrap();
+
+        password
+    }
+
+    pub fn print_table(&self, headers: &[&str], rows: &[Vec<String>]) {
+        let max_widths: Vec<usize> = headers
+            .iter()
+            .enumerate()
+            .map(|(i, &h)| {
+                rows.iter()
+                    .map(|r| r[i].len())
+                    .chain(std::iter::once(h.len()))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+
+        let print_row = |row: &[String]| {
+            for (i, cell) in row.iter().enumerate() {
+                print!("| {:<width$} ", cell, width = max_widths[i]);
             }
+            println!("|");
+        };
+
+        let separator = max_widths
+            .iter()
+            .map(|&w| "-".repeat(w + 2))
+            .collect::<Vec<_>>()
+            .join("+");
+
+        println!("+{}+", separator);
+        print_row(&headers.iter().map(|&s| s.to_string()).collect::<Vec<_>>());
+        println!("+{}+", separator);
+
+        for row in rows {
+            print_row(row);
         }
-    }
 
-    fn flush(&self) {}
-}
-
-/// Console handler for outputting logs to the console.
-pub struct ConsoleHandler {
-    formatter: Arc<dyn LogFormatter>,
-}
-
-impl ConsoleHandler {
-    /// Creates a new ConsoleHandler instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `formatter` - The formatter to use for formatting log entries.
-    ///
-    /// # Returns
-    ///
-    /// A new `ConsoleHandler` instance.
-    pub fn new(formatter: Arc<dyn LogFormatter>) -> Self {
-        Self { formatter }
+        println!("+{}+", separator);
     }
 }
-
-impl LogHandler for ConsoleHandler {
-    fn handle(&self, entry: &LogEntry) {
-        println!("{}", self.formatter.format(entry));
-    }
-}
-
-/// Custom console formatter for flexible log formatting.
-pub struct CustomConsoleFormatter {
-    format_string: String,
-}
-
-impl CustomConsoleFormatter {
-    /// Creates a new CustomConsoleFormatter instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `format_string` - The format string to use for formatting log entries.
-    ///
-    /// # Returns
-    ///
-    /// A new `CustomConsoleFormatter` instance.
-    pub fn new(format_string: String) -> Self {
-        Self { format_string }
-    }
-}
-
-impl LogFormatter for CustomConsoleFormatter {
-    fn format(&self, entry: &LogEntry) -> String {
-        let mut result = self.format_string.clone();
-        result = result.replace("{timestamp}", &entry.timestamp);
-        result = result.replace("{level}", &entry.level.to_string());
-        result = result.replace("{message}", &entry.message);
-        
-        result = result.replace("{level}", &entry.level.to_string().color(match entry.level {
-            Level::Error => Color::Red,
-            Level::Warn => Color::Yellow,
-            Level::Info => Color::Green,
-            Level::Debug => Color::Blue,
-            Level::Trace => Color::Magenta,
-        }).to_string());
-        
-        result
-    }
-}
-
-/// File handler for writing logs to a file.
-pub struct FileHandler {
-    file_path: String,
-    formatter: Arc<dyn LogFormatter>,
-}
-
-impl FileHandler {
-    /// Creates a new FileHandler instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - The path to the log file.
-    /// * `formatter` - The formatter to use for formatting log entries.
-    ///
-    /// # Returns
-    ///
-    /// A new `FileHandler` instance.
-    #[allow(dead_code)]
-    pub fn new(file_path: &str, formatter: Arc<dyn LogFormatter>) -> Self {
-        Self {
-            file_path: file_path.to_string(),
-            formatter,
-        }
-    }
-}
-
-impl LogHandler for FileHandler {
-    fn handle(&self, entry: &LogEntry) {
-        let formatted = self.formatter.format(entry);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.file_path)
-            .expect("Failed to open log file");
-
-        file.write_all(formatted.as_bytes())
-            .expect("Failed to write log");
-    }
-}
-
-/// Custom file formatter for flexible log file formatting.
-pub struct CustomFileFormatter {
-    format_string: String,
-}
-
-impl CustomFileFormatter {
-    /// Creates a new CustomFileFormatter instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `format_string` - The format string to use for formatting log entries.
-    ///
-    /// # Returns
-    ///
-    /// A new `CustomFileFormatter` instance.
-    #[allow(dead_code)]
-    pub fn new(format_string: String) -> Self {
-        Self { format_string }
-    }
-}
-
-impl LogFormatter for CustomFileFormatter {
-    fn format(&self, entry: &LogEntry) -> String {
-        let mut result = self.format_string.clone();
-        result = result.replace("{timestamp}", &entry.timestamp);
-        result = result.replace("{level}", &entry.level.to_string());
-        result = result.replace("{message}", &entry.message);
-        result + "\n"
-    }
-}
-
-// Example usage:
-//
-// fn main() {
-//     init_logger().expect("Failed to initialize logger");
-//
-//     log::error!("This is an error message");
-//     log::warn!("This is a warning message");
-//     log::info!("This is an info message");
-//     log::debug!("This is a debug message");
-// }
-//
-// Custom formatter example:
-//
-// let custom_format = "{timestamp} | {level} | {message}".to_string();
-// let custom_formatter = Arc::new(CustomConsoleFormatter::new(custom_format));
-// let custom_handler = Arc::new(ConsoleHandler::new(custom_formatter));
-// let logger = CustomLogger::new().add_handler(custom_handler);
-// log::set_boxed_logger(Box::new(logger)).expect("Failed to set logger");
-//
-// After setting up the logger, you can use the log macros throughout your code:
-//
-// log::info!("Application started");
-// log::warn!("Unusual behavior detected");
-// log::error!("Critical error occurred: {}", error_message);
-// log::debug!("Debug information: {:?}", debug_data);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
