@@ -1,14 +1,24 @@
-use data::problem::ProblemInfo;
+use core::console::{ConsoleHandler, CustomConsoleFormatter, CustomLogger};
+use std::sync::Arc;
+
+use log::{error, warn, info, debug, LevelFilter};
 
 mod api;
 mod data;
+mod core;
 
-#[tokio::main]
-async fn main() {
-    // Test with a valid problem ID
-    let problem_id: String = "1000".to_string();
-    let result: Result<ProblemInfo, reqwest::Error> = ProblemInfo::new(problem_id).await;
+fn main() {
+    let logger = CustomLogger::new()
+    .add_handler(Arc::new(ConsoleHandler::new(
+        Arc::new(CustomConsoleFormatter::new("[{timestamp}] [{level}] {message}".to_string()))
+    )));
     
-    let problem_info: ProblemInfo = result.unwrap();
-    eprint!("{:?}", problem_info);
+    log::set_logger(Box::leak(Box::new(logger))).expect("Failed to set logger");
+    log::set_max_level(LevelFilter::Debug);
+    
+    error!("This is an error message");
+    warn!("This is a warning message");
+    info!("This is an info message");
+    debug!("This is a debug message");
 }
+

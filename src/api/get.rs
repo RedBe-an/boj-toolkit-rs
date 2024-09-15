@@ -36,6 +36,7 @@ async fn main() -> Result<(), Error> {
 }
 
 */
+#[allow(dead_code)]
 pub async fn get_data(
     url: String,
     headers: Option<HashMap<String, String>>,

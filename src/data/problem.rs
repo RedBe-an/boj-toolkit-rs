@@ -65,6 +65,7 @@ impl ProblemInfo {
      * # Errors
      * Returns a `reqwest::Error` if the API request fails.
      */
+    #[allow(dead_code)]
     pub async fn new(problem_id: String) -> Result<Self, reqwest::Error> {
         let url: String = "https://solved.ac/api/v3/problem/show".to_string();
 
